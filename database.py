@@ -12,18 +12,6 @@ _thread_local = threading.local()
 
 
 def get_connection():
-    """
-    Get a database connection for the current thread.
-    
-    WHY THREAD-LOCAL:
-        SQLite in Python's default mode does not allow a connection created
-        in one thread to be used in another. We use threading.local() to give
-        each thread its own connection. This is a common pattern in
-        multi-threaded database applications.
-    
-    Returns:
-        sqlite3.Connection: A connection specific to the calling thread.
-    """
     if not hasattr(_thread_local, "connection") or _thread_local.connection is None:
         _thread_local.connection = sqlite3.connect(DATABASE_PATH, timeout=10)
         _thread_local.connection.row_factory = sqlite3.Row
@@ -32,7 +20,67 @@ def get_connection():
 
 
 def close_connection():
-    """Close the database connection for the current thread."""
     if hasattr(_thread_local, "connection") and _thread_local.connection is not None:
         _thread_local.connection.close()
         _thread_local.connection = None
+def create_tables():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            role        TEXT NOT NULL DEFAULT 'customer' 
+                        CHECK(role IN ('customer', 'admin', 'system')),
+            created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS accounts (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL,
+            account_type TEXT NOT NULL DEFAULT 'savings'
+                         CHECK(account_type IN ('savings', 'current', 'system')),
+            balance      REAL NOT NULL DEFAULT 0.0
+                         CHECK(balance >= 0),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS transactions (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            txn_id        TEXT NOT NULL,
+            operation     TEXT NOT NULL,
+            source_acc_id INTEGER,
+            dest_acc_id   INTEGER,
+            amount        REAL,
+            status        TEXT NOT NULL DEFAULT 'PENDING'
+                          CHECK(status IN ('PENDING', 'COMMITTED', 'ABORTED', 'ROLLED_BACK')),
+            timestamp     TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            details       TEXT,
+            FOREIGN KEY (source_acc_id) REFERENCES accounts(id),
+            FOREIGN KEY (dest_acc_id)   REFERENCES accounts(id)
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS security_logs (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp   TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            user_id     INTEGER,
+            txn_id      TEXT,
+            operation   TEXT NOT NULL,
+            resource    TEXT,
+            result      TEXT NOT NULL 
+                        CHECK(result IN ('ALLOWED', 'BLOCKED', 'FLAGGED', 'REJECTED')),
+            event_type  TEXT NOT NULL
+                        CHECK(event_type IN (
+                            'NORMAL', 'UNAUTHORIZED_ACCESS', 'SQL_INJECTION',
+                            'RATE_LIMIT_EXCEEDED', 'REPEATED_FAILURE',
+                            'RESTRICTED_ACCESS', 'DEADLOCK', 'SUSPICIOUS'
+                        )),
+            reason      TEXT
+    """)
+
+    conn.commit()
+    print("[DATABASE] All tables created successfully.")
