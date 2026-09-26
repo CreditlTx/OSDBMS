@@ -84,3 +84,38 @@ def create_tables():
 
     conn.commit()
     print("[DATABASE] All tables created successfully.")
+def seed_data():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    if cursor.fetchone()[0] > 0:
+        print("[DATABASE] Seed data already exists. Skipping.")
+        return
+
+    users = [
+        ("Alice", "customer"),
+        ("Bob", "customer"),
+        ("Charlie", "customer"),
+        ("Admin", "admin"),
+    ]
+    cursor.executemany("INSERT INTO users (name, role) VALUES (?, ?)", users)
+
+    accounts = [
+        (1, "savings", 10000.0),
+        (2, "savings", 10000.0),
+        (3, "current", 10000.0),
+        (4, "system",  50000.0),
+    ]
+    cursor.executemany(
+        "INSERT INTO accounts (user_id, account_type, balance) VALUES (?, ?, ?)",
+        accounts
+    )
+
+    conn.commit()
+    print("[DATABASE] Seed data inserted successfully.")
+    print("           Alice  (Account 1): Rs.10,000")
+    print("           Bob    (Account 2): Rs.10,000")
+    print("           Charlie(Account 3): Rs.10,000")
+    print("           Admin  (Account 4): Rs.50,000 (restricted)")
+    print("           Total: Rs.80,000")
