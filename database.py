@@ -119,3 +119,70 @@ def seed_data():
     print("           Charlie(Account 3): Rs.10,000")
     print("           Admin  (Account 4): Rs.50,000 (restricted)")
     print("           Total: Rs.80,000")
+
+def get_account_balance(account_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT balance FROM accounts WHERE id = ?", (account_id,))
+    row = cursor.fetchone()
+    return row["balance"] if row else None
+
+def update_account_balance(account_id, new_balance):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE accounts SET balance = ? WHERE id = ?",
+            (new_balance, account_id)
+        )
+        return cursor.rowcount > 0
+    except sqlite3.IntegrityError as e:
+        print(f"[DATABASE] Integrity error: {e}")
+        return False
+
+def get_all_accounts():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT a.id, a.user_id, u.name AS user_name, a.account_type, a.balance
+        FROM accounts a
+        JOIN users u ON a.user_id = u.id
+        ORDER BY a.id
+    """)
+    return [dict(row) for row in cursor.fetchall()]
+
+def get_all_users():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users ORDER BY id")
+    return [dict(row) for row in cursor.fetchall()]
+
+def record_transaction(txn_id, operation, source_acc_id=None, dest_acc_id=None,
+                       amount=None, status="PENDING", details=None):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO transactions (txn_id, operation, source_acc_id, dest_acc_id,
+                                  amount, status, details)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (txn_id, operation, source_acc_id, dest_acc_id, amount, status, details))
+    conn.commit()
+
+def update_transaction_status(txn_id, new_status):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE transactions SET status = ? WHERE txn_id = ?",
+        (new_status, txn_id)
+    )
+    conn.commit()
+
+def get_recent_transactions(limit=20):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM transactions
+        ORDER BY id DESC
+        LIMIT ?
+    """, (limit,))
+    return [dict(row) for row in cursor.fetchall()]
