@@ -34,6 +34,7 @@ def create_tables():
             role        TEXT NOT NULL DEFAULT 'customer' 
                         CHECK(role IN ('customer', 'admin', 'system')),
             created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
     """)
 
     cursor.execute("""
@@ -45,6 +46,7 @@ def create_tables():
             balance      REAL NOT NULL DEFAULT 0.0
                          CHECK(balance >= 0),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
     """)
 
     cursor.execute("""
@@ -61,6 +63,7 @@ def create_tables():
             details       TEXT,
             FOREIGN KEY (source_acc_id) REFERENCES accounts(id),
             FOREIGN KEY (dest_acc_id)   REFERENCES accounts(id)
+        )
     """)
 
     cursor.execute("""
@@ -80,6 +83,7 @@ def create_tables():
                             'RESTRICTED_ACCESS', 'DEADLOCK', 'SUSPICIOUS'
                         )),
             reason      TEXT
+        )
     """)
 
     conn.commit()
@@ -186,3 +190,72 @@ def get_recent_transactions(limit=20):
         LIMIT ?
     """, (limit,))
     return [dict(row) for row in cursor.fetchall()]
+def log_security_event(user_id=None, txn_id=None, operation="", resource=None,
+                       result="FLAGGED", event_type="SUSPICIOUS", reason=""):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO security_logs (user_id, txn_id, operation, resource,
+                                   result, event_type, reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (user_id, txn_id, operation, resource, result, event_type, reason))
+    conn.commit()
+
+def get_security_logs(limit=30):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM security_logs
+        ORDER BY id DESC
+        LIMIT ?
+    """, (limit,))
+    return [dict(row) for row in cursor.fetchall()]
+
+def reset_database():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("DROP TABLE IF EXISTS security_logs")
+    cursor.execute("DROP TABLE IF EXISTS transactions")
+    cursor.execute("DROP TABLE IF EXISTS accounts")
+    cursor.execute("DROP TABLE IF EXISTS users")
+    conn.commit()
+
+    print("[DATABASE] All tables dropped.")
+
+    create_tables()
+    seed_data()
+    print("[DATABASE] Database reset complete.")
+
+
+def init_database():
+    os.makedirs(DATABASE_DIR, exist_ok=True)
+
+    create_tables()
+    seed_data()
+
+
+if __name__ == "__main__":
+    
+    print("=" * 60)
+    print("DATABASE MODULE TEST")
+    print("=" * 60)
+
+    init_database()
+
+    print("\n--- All Accounts ---")
+    accounts = get_all_accounts()
+    for acc in accounts:
+        print(f"  Account {acc['id']}: {acc['user_name']} "
+              f"({acc['account_type']}) - Rs.{acc['balance']:,.2f}")
+
+    balance = get_account_balance(1)
+    print(f"\nAlice's balance (Account 1): Rs.{balance:,.2f}")
+
+    total = sum(acc["balance"] for acc in accounts)
+    print(f"\nTotal money in system: Rs.{total:,.2f}")
+    assert total == 80000.0, f"Expected Rs.80,000 but got Rs.{total:,.2f}"
+    print("[OK] Conservation check passed!")
+
+    close_connection()
+    print("\n[TEST] Database module test completed successfully.")
