@@ -173,3 +173,78 @@ class Transaction:
         })
 
         return success
+    def transfer(self, from_account, to_account, amount):
+        self.current_operation = (
+            f"Transfer Rs.{amount} from Account {from_account} "
+            f"to Account {to_account}"
+        )
+        print(f"[{self.txn_id}] {self.current_operation}")
+
+        allowed, reason = self._security.check_operation(
+            user_id=self.user_id, txn_id=self.txn_id,
+            operation="TRANSFER",
+            resource=f"account_{from_account}",
+            amount=amount
+        )
+        if not allowed:
+            print(f"[{self.txn_id}] Transfer blocked by security: {reason}")
+            return False
+
+        if not self.acquire_lock(f"account_{from_account}", LockType.EXCLUSIVE):
+            print(f"[{self.txn_id}] Could not acquire lock on account {from_account}")
+            return False
+
+        source_balance = database.get_account_balance(from_account)
+        if source_balance is None:
+            print(f"[{self.txn_id}] Source account {from_account} not found")
+            return False
+
+        if source_balance < amount:
+            print(f"[{self.txn_id}] Insufficient funds: Rs.{source_balance} < Rs.{amount}")
+            return False
+
+        if f"account_{from_account}" not in self._undo_log:
+            self._undo_log[f"account_{from_account}"] = source_balance
+
+        if not self.acquire_lock(f"account_{to_account}", LockType.EXCLUSIVE):
+            print(f"[{self.txn_id}] Could not acquire lock on account {to_account}")
+            return False
+
+        dest_balance = database.get_account_balance(to_account)
+        if dest_balance is None:
+            print(f"[{self.txn_id}] Destination account {to_account} not found")
+            return False
+
+        if f"account_{to_account}" not in self._undo_log:
+            self._undo_log[f"account_{to_account}"] = dest_balance
+
+        success1 = database.update_account_balance(from_account, source_balance - amount)
+        success2 = database.update_account_balance(to_account, dest_balance + amount)
+
+        if success1 and success2:
+            self.operations_log.append({
+                "action": "TRANSFER",
+                "from": from_account,
+                "to": to_account,
+                "amount": amount,
+                "success": True,
+                "time": time.strftime("%H:%M:%S")
+            })
+
+            database.record_transaction(
+                self.txn_id, "TRANSFER",
+                source_acc_id=from_account,
+                dest_acc_id=to_account,
+                amount=amount,
+                status="PENDING",
+                details=f"Transfer Rs.{amount} from Acc-{from_account} to Acc-{to_account}"
+            )
+
+            print(f"[{self.txn_id}] Transfer executed: "
+                  f"Acc-{from_account} ({source_balance} -> {source_balance - amount}), "
+                  f"Acc-{to_account} ({dest_balance} -> {dest_balance + amount})")
+            return True
+        else:
+            print(f"[{self.txn_id}] Transfer failed - rolling back")
+            return False
+
